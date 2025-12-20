@@ -1,0 +1,93 @@
+name: Build, Test, and Update Development Environment
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    - cron: '0 0 * * *'  # Run every night at midnight UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    if: "${{ github.event_name != 'push' || !contains(github.event.head_commit.message, '[skip ci]') }}"
+    strategy:
+      matrix:
+        runner: 
+          - ubuntu-latest          # x86_64 Linux
+          - ubuntu-24.04-arm       # ARM64 Linux  
+          - macos-latest           # x86_64 macOS
+    runs-on: ${{ matrix.runner }}
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        fetch-depth: 0
+
+    - name: Install Nix
+      uses: DeterminateSystems/nix-installer-action@main
+      with:
+        extra-conf: |
+          experimental-features = nix-command flakes
+
+    - name: Update flake.lock
+      run: |
+        nix flake update 
+
+    - name: Install Nix Profile
+      run: |
+        nix profile install .#default
+
+    - name: Test nix develop environment
+      run: |
+        # Test that nix develop works and provides the expected tools
+        nix develop . -c bash -c "echo 'Nix develop test successful'"
+
+    - name: Build Container image
+      if: runner.os == 'Linux'
+      run: |
+        docker build -t container-built-dev-env .
+
+    - name: Test Container image
+      if: runner.os == 'Linux'
+      run: |
+        # Test that the image runs and basic commands work
+        docker run --rm container-built-dev-env bash -c "echo 'Container test successful'"
+
+    - name: Build Nix Container image
+      if: runner.os == 'Linux'
+      run: |
+        # Build the container image using Nix
+        nix build .#containerImage
+        docker load < result
+
+    - name: Test Nix Container image
+      if: runner.os == 'Linux'
+      run: |
+        # Test that the Nix-built image runs and basic commands work
+        docker run --rm dev-env bash -c "echo 'Container test successful'"
+
+    - name: Check for flake.lock changes
+      id: check_changes
+      if: matrix.runner == 'ubuntu-latest'
+      run: |
+        if git diff --quiet flake.lock; then
+          echo "changes=false" >> $GITHUB_OUTPUT
+        else
+          echo "changes=true" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Commit updated flake.lock
+      if: steps.check_changes.outputs.changes == 'true' && github.event_name != 'pull_request' && matrix.runner == 'ubuntu-latest' && github.repository == 'michaelperel/nix-dev-env'
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add flake.lock
+        git commit -m "Update flake.lock [skip ci]"
+        git push origin HEAD:${{ github.ref_name }}
