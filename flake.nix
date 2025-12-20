@@ -193,47 +193,50 @@
               #!${pkgs.bash}/bin/bash
               set -euxo pipefail
 
-              mkdir -p /etc /etc/profile.d /etc/skel /root /tmp /app /etc/ssl/certs /home/nonroot
-              chmod 1777 /tmp
-              chmod 0777 /app
-              chmod 0755 /home/nonroot
+              # `extraCommands` runs while assembling the image filesystem tree.
+              # Use relative paths so we write into the image root, not the builder's real '/'.
+              mkdir -p etc/profile.d etc/skel root tmp app home/nonroot etc/ssl
+              chmod 1777 tmp
+              chmod 0777 app
+              # Make HOME writable without relying on chown/fakeroot
+              chmod 0777 home/nonroot
 
               # Global profile loader
-              cat > /etc/profile <<"EOF"
+              cat > etc/profile <<"EOF"
 for f in /etc/profile.d/*.sh; do
   . "$f"
 done
 EOF
 
               # Profile snippets
-              install -m 0644 ${profileEnv}        /etc/profile.d/00-env.sh
-              install -m 0644 ${profileCompletion} /etc/profile.d/10-completion.sh
-              install -m 0644 ${profilePrompt}     /etc/profile.d/20-prompt.sh
+              install -m 0644 ${profileEnv}        etc/profile.d/00-env.sh
+              install -m 0644 ${profileCompletion} etc/profile.d/10-completion.sh
+              install -m 0644 ${profilePrompt}     etc/profile.d/20-prompt.sh
 
               # Skeleton files
-              install -m 0644 ${userBashrc} /etc/skel/.bashrc
+              install -m 0644 ${userBashrc} etc/skel/.bashrc
 
               # --- Users ---
               # Avoid useradd/groupadd here: during dockerTools image assembly we may not have
               # all the OS config files those tools expect. For containers, minimal passwd/group
               # entries are sufficient for `User = "nonroot"` to resolve.
-              cat > /etc/passwd <<"EOF"
+              cat > etc/passwd <<"EOF"
 root:x:0:0:root:/root:/bin/bash
 nonroot:x:1000:1000:nonroot:/home/nonroot:/bin/bash
 nobody:x:65534:65534:nobody:/nonexistent:/bin/false
 EOF
 
-              cat > /etc/group <<"EOF"
+              cat > etc/group <<"EOF"
 root:x:0:
 nonroot:x:1000:
 nogroup:x:65534:
 EOF
 
-              chown -R 1000:1000 /home/nonroot || true
+              echo '. /etc/profile' > etc/bash.bashrc
 
-              echo '. /etc/profile' > /etc/bash.bashrc
-
-              ln -snf ${pkgs.cacert}/etc/ssl/certs /etc/ssl/certs
+              # TLS trust (ensure it's a symlink, not a directory)
+              rm -rf etc/ssl/certs
+              ln -sfn ${pkgs.cacert}/etc/ssl/certs etc/ssl/certs
             '';
 
             config = {
