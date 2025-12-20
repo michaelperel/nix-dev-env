@@ -11,12 +11,6 @@ Enter the dev shell:
 nix develop
 ```
 
-If you want to run without writing/using a lock file:
-
-```bash
-nix develop . --no-write-lock-file
-```
-
 ## Container image (built by Nix, Linux only)
 
 Build the image:
@@ -30,6 +24,26 @@ Load it into Podman and run:
 ```bash
 podman load < result
 podman run --rm -it --userns=keep-id dev-env:latest
+```
+
+If `podman load` fails with “no policy.json file found”, create a minimal policy file (dev-only) or install your distro’s `containers-common` package:
+
+```bash
+mkdir -p "${XDG_CONFIG_HOME:-$HOME/.config}/containers"
+cat > "${XDG_CONFIG_HOME:-$HOME/.config}/containers/policy.json" <<'EOF'
+{
+	"default": [
+		{ "type": "insecureAcceptAnything" }
+	]
+}
+EOF
+```
+
+If you see an error mentioning `newuidmap`/`newgidmap` not being setuid (common on rootless Podman), install the system `uidmap` package:
+
+```bash
+sudo apt-get update && sudo apt-get install -y uidmap
+podman load < result
 ```
 
 Notes:

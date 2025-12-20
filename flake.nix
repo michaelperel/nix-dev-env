@@ -140,7 +140,8 @@
 
           # Prompt: [nix-dev] user@host:cwd (gitbranch)
           PS1="''${BLUE}[nix-dev]''${RESET} ''${GREEN}\u@\h''${RESET}:''${YELLOW}\w''${RESET}"
-          PS1+="''${CYAN}$(__git_ps1 ' (%s)')''${RESET}\$ "
+          # Escape `$` so __git_ps1 runs each time the prompt is drawn.
+          PS1+="''${CYAN}\$(__git_ps1 ' (%s)')''${RESET}\$ "
 
           alias ll='ls -alF'
           alias la='ls -A'
@@ -189,40 +190,57 @@
 
             copyToRoot = mergedEnv;
 
-            runAsRoot = ''
+            extraCommands = ''
               #!${pkgs.bash}/bin/bash
               set -euxo pipefail
 
-              mkdir -p /etc /etc/profile.d /root /tmp /app /etc/ssl/certs
-              chmod 1777 /tmp
-              chmod 0777 /app
+              # `extraCommands` runs while assembling the image filesystem tree.
+              # Use relative paths so we write into the image root, not the builder's real '/'.
+              mkdir -p etc/profile.d etc/skel root tmp app home/nonroot etc/ssl
+              chmod 1777 tmp
+              chmod 0777 app
+              # Make HOME writable without relying on chown/fakeroot
+              chmod 0777 home/nonroot
 
               # Global profile loader
-              cat > /etc/profile <<"EOF"
+              cat > etc/profile <<"EOF"
 for f in /etc/profile.d/*.sh; do
   . "$f"
 done
 EOF
 
               # Profile snippets
-              install -m 0644 ${profileEnv}        /etc/profile.d/00-env.sh
-              install -m 0644 ${profileCompletion} /etc/profile.d/10-completion.sh
-              install -m 0644 ${profilePrompt}     /etc/profile.d/20-prompt.sh
+              install -m 0644 ${profileEnv}        etc/profile.d/00-env.sh
+              install -m 0644 ${profileCompletion} etc/profile.d/10-completion.sh
+              install -m 0644 ${profilePrompt}     etc/profile.d/20-prompt.sh
 
               # Skeleton files
-              install -d -m 0755 /etc/skel
-              install -m 0644 ${userBashrc} /etc/skel/.bashrc
+              install -m 0644 ${userBashrc} etc/skel/.bashrc
+              # `useradd --create-home` would normally copy this into the user's home.
+              # Since we don't run useradd/groupadd during image assembly, do it explicitly.
+              install -m 0644 ${userBashrc} home/nonroot/.bashrc
 
-              # --- Users with full flags ---
-              ${pkgs.shadow}/bin/groupadd --gid 1000 nonroot
-              ${pkgs.shadow}/bin/useradd  --uid 1000 --gid 1000 --create-home --shell /bin/bash nonroot
+              # --- Users ---
+              # Avoid useradd/groupadd here: during dockerTools image assembly we may not have
+              # all the OS config files those tools expect. For containers, minimal passwd/group
+              # entries are sufficient for `User = "nonroot"` to resolve.
+              cat > etc/passwd <<"EOF"
+root:x:0:0:root:/root:/bin/bash
+nonroot:x:1000:1000:nonroot:/home/nonroot:/bin/bash
+nobody:x:65534:65534:nobody:/nonexistent:/bin/false
+EOF
 
-              ${pkgs.shadow}/bin/groupadd --gid 65534 nogroup
-              ${pkgs.shadow}/bin/useradd  --uid 65534 --gid 65534 --no-create-home --home-dir /nonexistent --shell /bin/false --system nobody
+              cat > etc/group <<"EOF"
+root:x:0:
+nonroot:x:1000:
+nogroup:x:65534:
+EOF
 
-              echo '. /etc/profile' > /etc/bash.bashrc
+              echo '. /etc/profile' > etc/bash.bashrc
 
-              ln -snf ${pkgs.cacert}/etc/ssl/certs /etc/ssl/certs
+              # TLS trust (ensure it's a symlink, not a directory)
+              rm -rf etc/ssl/certs
+              ln -sfn ${pkgs.cacert}/etc/ssl/certs etc/ssl/certs
             '';
 
             config = {
