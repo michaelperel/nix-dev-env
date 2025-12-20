@@ -140,7 +140,8 @@
 
           # Prompt: [nix-dev] user@host:cwd (gitbranch)
           PS1="''${BLUE}[nix-dev]''${RESET} ''${GREEN}\u@\h''${RESET}:''${YELLOW}\w''${RESET}"
-          PS1+="''${CYAN}$(__git_ps1 ' (%s)')''${RESET}\$ "
+          # Escape `$` so __git_ps1 runs each time the prompt is drawn.
+          PS1+="''${CYAN}\$(__git_ps1 ' (%s)')''${RESET}\$ "
 
           alias ll='ls -alF'
           alias la='ls -A'
@@ -215,6 +216,9 @@ EOF
 
               # Skeleton files
               install -m 0644 ${userBashrc} etc/skel/.bashrc
+              # `useradd --create-home` would normally copy this into the user's home.
+              # Since we don't run useradd/groupadd during image assembly, do it explicitly.
+              install -m 0644 ${userBashrc} home/nonroot/.bashrc
 
               # --- Users ---
               # Avoid useradd/groupadd here: during dockerTools image assembly we may not have
