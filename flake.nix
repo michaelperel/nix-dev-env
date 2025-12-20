@@ -189,13 +189,14 @@
 
             copyToRoot = mergedEnv;
 
-            runAsRoot = ''
+            extraCommands = ''
               #!${pkgs.bash}/bin/bash
               set -euxo pipefail
 
-              mkdir -p /etc /etc/profile.d /root /tmp /app /etc/ssl/certs
+              mkdir -p /etc /etc/profile.d /etc/skel /root /tmp /app /etc/ssl/certs /home/nonroot
               chmod 1777 /tmp
               chmod 0777 /app
+              chmod 0755 /home/nonroot
 
               # Global profile loader
               cat > /etc/profile <<"EOF"
@@ -210,15 +211,25 @@ EOF
               install -m 0644 ${profilePrompt}     /etc/profile.d/20-prompt.sh
 
               # Skeleton files
-              install -d -m 0755 /etc/skel
               install -m 0644 ${userBashrc} /etc/skel/.bashrc
 
-              # --- Users with full flags ---
-              ${pkgs.shadow}/bin/groupadd --gid 1000 nonroot
-              ${pkgs.shadow}/bin/useradd  --uid 1000 --gid 1000 --create-home --shell /bin/bash nonroot
+              # --- Users ---
+              # Avoid useradd/groupadd here: during dockerTools image assembly we may not have
+              # all the OS config files those tools expect. For containers, minimal passwd/group
+              # entries are sufficient for `User = "nonroot"` to resolve.
+              cat > /etc/passwd <<"EOF"
+root:x:0:0:root:/root:/bin/bash
+nonroot:x:1000:1000:nonroot:/home/nonroot:/bin/bash
+nobody:x:65534:65534:nobody:/nonexistent:/bin/false
+EOF
 
-              ${pkgs.shadow}/bin/groupadd --gid 65534 nogroup
-              ${pkgs.shadow}/bin/useradd  --uid 65534 --gid 65534 --no-create-home --home-dir /nonexistent --shell /bin/false --system nobody
+              cat > /etc/group <<"EOF"
+root:x:0:
+nonroot:x:1000:
+nogroup:x:65534:
+EOF
+
+              chown -R 1000:1000 /home/nonroot || true
 
               echo '. /etc/profile' > /etc/bash.bashrc
 
