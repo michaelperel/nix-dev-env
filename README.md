@@ -23,7 +23,7 @@ Load it into Podman and run:
 
 ```bash
 podman load < result
-podman run --rm -it --userns=keep-id dev-env:latest
+podman run --rm -it --userns=keep-id nix-dev-env:latest
 ```
 
 If `podman load` fails with “no policy.json file found”, create a minimal policy file (dev-only) or install your distro’s `containers-common` package:
@@ -58,13 +58,13 @@ If you don’t have Nix installed, you can build the included `Dockerfile`. It i
 Using Podman:
 
 ```bash
-podman build -t dev-env .
-podman run --rm -it --userns=keep-id dev-env
+podman build -t nix-dev-env .
+podman run --rm -it --userns=keep-id nix-dev-env
 ```
 
 Using Docker:
 
 ```bash
-docker build -t dev-env .
-docker run --rm -it dev-env
+docker build -t nix-dev-env .
+docker run --rm -it nix-dev-env
 ```
