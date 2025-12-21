@@ -98,7 +98,7 @@
         allPackages = commonPackages ++ (if isLinux then linuxPackages else []);
 
         mergedEnv = pkgs.buildEnv {
-          name = "dev-env";
+          name = "nix-dev-env";
           paths = allPackages;
           pathsToLink = [ "/bin" "/share" ];
         };
@@ -166,7 +166,7 @@
       {
         # ---------------- nix develop shell ----------------
         devShells.default = pkgs.mkShell {
-          name = "dev-env";
+          name = "nix-dev-env";
           packages = allPackages;
           shellHook = ''
             . ${profileEnv}
@@ -185,7 +185,7 @@
         } // pkgs.lib.optionalAttrs isLinux {
           # Container image (Linux only)
           containerImage = pkgs.dockerTools.buildImage {
-            name = "dev-env";
+            name = "nix-dev-env";
             tag  = "latest";
 
             copyToRoot = mergedEnv;
