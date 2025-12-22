@@ -196,7 +196,10 @@
 
               # `extraCommands` runs while assembling the image filesystem tree.
               # Use relative paths so we write into the image root, not the builder's real '/'.
-              mkdir -p etc/profile.d etc/skel root tmp app home/nonroot etc/ssl
+              mkdir -p etc/profile.d etc/skel root tmp app home/nonroot etc/ssl usr/bin
+
+              # Many scripts expect /usr/bin/env
+              ln -s /bin/env usr/bin/env
               chmod 1777 tmp
               chmod 0777 app
               # Make HOME writable without relying on chown/fakeroot
