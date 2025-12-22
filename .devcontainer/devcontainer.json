@@ -1,0 +1,11 @@
+{
+    "image": "mperel/nix-dev-env",
+    "workspaceMount": "source=${localWorkspaceFolder},target=/app,type=bind",
+    "remoteUser": "nonroot",
+    "containerUser": "nonroot",
+    "workspaceFolder": "/app",
+    "remoteEnv": {
+        "HOME": "/home/nonroot"
+    },
+    "overrideCommand": false
+}
