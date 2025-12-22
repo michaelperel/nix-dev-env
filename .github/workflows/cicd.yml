@@ -14,7 +14,6 @@ permissions:
 
 jobs:
   linux:
-    if: ${{ github.event_name != 'push' || !contains(github.event.head_commit.message, '[skip ci]') }}
     strategy:
       fail-fast: false
       matrix:
@@ -74,14 +73,14 @@ jobs:
         docker run --rm nix-dev-env bash -c "echo 'Container test successful'"
 
     - name: Export Nix image tarball (for publish)
-      if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'michaelperel/nix-dev-env' }}
+      if: ${{ github.ref == 'refs/heads/main' && github.repository == 'michaelperel/nix-dev-env' }}
       run: |
         set -euo pipefail
         # `result` is a symlink; copy the actual tarball so upload-artifact gets a real file.
         cp -L result "nix-image-${{ matrix.arch }}.tar"
 
     - name: Upload Nix image tarball artifact
-      if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'michaelperel/nix-dev-env' }}
+      if: ${{ github.ref == 'refs/heads/main' && github.repository == 'michaelperel/nix-dev-env' }}
       uses: actions/upload-artifact@v4
       with:
         name: nix-image-${{ matrix.arch }}
@@ -89,7 +88,6 @@ jobs:
         retention-days: 1 
 
   macos:
-    if: ${{ github.event_name != 'push' || !contains(github.event.head_commit.message, '[skip ci]') }}
     runs-on: macos-latest
 
     steps:
@@ -153,13 +151,13 @@ jobs:
         git config --local user.email "action@github.com"
         git config --local user.name "GitHub Action"
         git add flake.lock
-        git commit -m "Update flake.lock [skip ci]"
+        git commit -m "Update flake.lock"
         git push origin HEAD:${{ github.ref_name }}
 
   publish_nix_images:
     name: Publish Nix images (${{ matrix.arch }})
     needs: linux
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'michaelperel/nix-dev-env' }}
+    if: ${{ github.ref == 'refs/heads/main' && github.repository == 'michaelperel/nix-dev-env' }}
     runs-on: ${{ matrix.runner }}
     environment: dockerhub
     strategy:
@@ -221,7 +219,7 @@ jobs:
   push_nix_manifest:
     name: Push multi-arch manifest
     needs: publish_nix_images
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'michaelperel/nix-dev-env' }}
+    if: ${{ github.ref == 'refs/heads/main' && github.repository == 'michaelperel/nix-dev-env' }}
     runs-on: ubuntu-latest
     environment: dockerhub
     permissions:
