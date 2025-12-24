@@ -79,6 +79,7 @@ jobs:
 
         # Verify the build works
         nix build .#containerImageFedora
+        rm result
 
         # Save the hash and digest for later aggregation
         mkdir -p /tmp/fedora-hashes
@@ -97,7 +98,6 @@ jobs:
       if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
       run: |
         nix flake update
-
 
     - name: Upload flake.lock artifact
       if: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && github.repository == 'michaelperel/nix-dev-env' && matrix.runner == 'ubuntu-latest' }}
@@ -127,6 +127,7 @@ jobs:
       run: |
         nix build .#containerImage
         docker load < result
+        rm result
 
     - name: Test Nix Container image
       run: |
@@ -136,6 +137,7 @@ jobs:
       run: |
         nix build .#containerImageFedora
         docker load < result
+        rm result
 
     - name: Test Nix Fedora Container image
       run: |
@@ -156,19 +158,11 @@ jobs:
         path: nix-image-${{ matrix.arch }}.tar
         retention-days: 1
 
-    - name: Export VSCode image tarball (for publish)
-      if: ${{ github.ref == 'refs/heads/main' && github.repository == 'michaelperel/nix-dev-env' }}
+    - name: Cleanup Nix image
       run: |
-        set -euo pipefail
-        docker save container-built-nix-dev-env -o "vscode-image-${{ matrix.arch }}.tar"
-
-    - name: Upload VSCode image tarball artifact
-      if: ${{ github.ref == 'refs/heads/main' && github.repository == 'michaelperel/nix-dev-env' }}
-      uses: actions/upload-artifact@v4
-      with:
-        name: vscode-image-${{ matrix.arch }}
-        path: vscode-image-${{ matrix.arch }}.tar
-        retention-days: 1
+        rm -f "nix-image-${{ matrix.arch }}.tar" || true
+        docker image rm nix-dev-env:latest || true
+        docker image rm container-built-nix-dev-env:latest || true
 
     - name: Export Fedora image tarball (for publish)
       if: ${{ github.ref == 'refs/heads/main' && github.repository == 'michaelperel/nix-dev-env' }}
@@ -183,6 +177,11 @@ jobs:
         name: fedora-image-${{ matrix.arch }}
         path: fedora-image-${{ matrix.arch }}.tar
         retention-days: 1
+
+    - name: Cleanup Fedora image
+      run: |
+        rm -f "fedora-image-${{ matrix.arch }}.tar" || true
+        docker image rm nix-dev-env-fedora:latest fedora:latest || true
 
   macos:
     runs-on: macos-latest
