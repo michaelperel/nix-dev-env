@@ -257,13 +257,19 @@ EOF
           };
 
           # Container image with Fedora base (Linux only)
-          containerImageFedora = pkgs.dockerTools.buildImage {
+          # Note: sha256 differs per architecture since Docker images are arch-specific
+          containerImageFedora = let
+            fedoraSha256 = {
+              "x86_64-linux" = "sha256-rZzZzVzrw5DKhiH55LFRZU09Gj0Ber2I7lJOkVR2Zn0=";
+              "aarch64-linux" = "sha256-3J6l6kLDvUU0f4ncdOBx58GBy0HXekkXqno1BZLxsLY=";
+            };
+          in pkgs.dockerTools.buildImage {
             name = "nix-dev-env-fedora";
             tag  = "latest";
             fromImage = pkgs.dockerTools.pullImage {
               imageName = "fedora";
               imageDigest = "sha256:6cd815d862109208adf6040ea13391fe6aeb87a9dc80735c2ab07083fdf5e03a";
-              sha256 = "sha256-rZzZzVzrw5DKhiH55LFRZU09Gj0Ber2I7lJOkVR2Zn0=";
+              sha256 = fedoraSha256.${system};
               finalImageName = "fedora";
               finalImageTag = "latest";
             };

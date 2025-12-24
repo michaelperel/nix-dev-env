@@ -39,28 +39,26 @@ jobs:
       run: |
         set -euo pipefail
 
+        # Determine the Nix system name for this architecture
+        if [[ "${{ matrix.arch }}" == "amd64" ]]; then
+          NIX_SYSTEM="x86_64-linux"
+        else
+          NIX_SYSTEM="aarch64-linux"
+        fi
+
         # Pull latest Fedora and get its digest
         docker pull fedora:latest
         NEW_DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' fedora:latest | cut -d'@' -f2)
-
-        # Get current digest from flake.nix
-        CURRENT_DIGEST=$(grep -oP 'imageDigest = "\K[^"]+' flake.nix | head -1)
-
-        if [[ "$NEW_DIGEST" == "$CURRENT_DIGEST" ]]; then
-          echo "Fedora digest unchanged: $CURRENT_DIGEST"
-          exit 0
-        fi
-
-        echo "Updating Fedora digest from $CURRENT_DIGEST to $NEW_DIGEST"
+        echo "Latest Fedora digest: $NEW_DIGEST"
 
         # Update the imageDigest in flake.nix
-        sed -i "s|imageDigest = \"$CURRENT_DIGEST\"|imageDigest = \"$NEW_DIGEST\"|" flake.nix
+        sed -i "s|imageDigest = \"sha256:[^\"]*\"|imageDigest = \"$NEW_DIGEST\"|" flake.nix
 
         # Use a fake hash to trigger Nix to tell us the correct one
         FAKE_HASH="sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
-        sed -i "s|sha256 = \"sha256-[^\"]*\"|sha256 = \"$FAKE_HASH\"|" flake.nix
+        sed -i "s|\"$NIX_SYSTEM\" = \"sha256-[^\"]*\"|\"$NIX_SYSTEM\" = \"$FAKE_HASH\"|" flake.nix
 
-        # Try to build and capture the correct hash from the error
+        # Build and capture the correct hash from the error
         set +e
         BUILD_OUTPUT=$(nix build .#containerImageFedora 2>&1)
         set -e
@@ -74,27 +72,32 @@ jobs:
           exit 1
         fi
 
-        echo "Correct Nix hash: $CORRECT_HASH"
+        echo "Correct Nix hash for $NIX_SYSTEM: $CORRECT_HASH"
 
-        # Update the sha256 in flake.nix with the correct hash
-        sed -i "s|sha256 = \"$FAKE_HASH\"|sha256 = \"$CORRECT_HASH\"|" flake.nix
+        # Update with the correct hash
+        sed -i "s|\"$NIX_SYSTEM\" = \"$FAKE_HASH\"|\"$NIX_SYSTEM\" = \"$CORRECT_HASH\"|" flake.nix
 
-        # Verify the build works now
+        # Verify the build works
         nix build .#containerImageFedora
-        echo "Fedora base image updated successfully"
+
+        # Save the hash and digest for later aggregation
+        mkdir -p /tmp/fedora-hashes
+        echo "$CORRECT_HASH" > "/tmp/fedora-hashes/$NIX_SYSTEM.hash"
+        echo "$NEW_DIGEST" > "/tmp/fedora-hashes/digest"
+
+    - name: Upload Fedora hash artifact
+      if: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && github.repository == 'michaelperel/nix-dev-env' }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: fedora-hash-${{ matrix.arch }}
+        path: /tmp/fedora-hashes/
+        retention-days: 1
 
     - name: Update flake.lock (schedule/dispatch only)
       if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
       run: |
         nix flake update
 
-    - name: Upload flake.nix artifact
-      if: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && github.repository == 'michaelperel/nix-dev-env' && matrix.runner == 'ubuntu-latest' }}
-      uses: actions/upload-artifact@v4
-      with:
-        name: flake-nix
-        path: flake.nix
-        retention-days: 1
 
     - name: Upload flake.lock artifact
       if: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && github.repository == 'michaelperel/nix-dev-env' && matrix.runner == 'ubuntu-latest' }}
@@ -208,7 +211,7 @@ jobs:
         nix develop . -c bash -c "echo 'Nix develop test successful'"
 
   commit_flake_lock:
-    name: Commit flake.lock update
+    name: Commit flake updates
     needs:
       - linux
       - macos
@@ -230,12 +233,49 @@ jobs:
         name: flake-lock
         path: /tmp/flake-lock
 
-    - name: Apply updated flake.lock
+    - name: Download Fedora hash artifacts
+      uses: actions/download-artifact@v4
+      with:
+        pattern: fedora-hash-*
+        path: /tmp/fedora-hashes
+        merge-multiple: false
+      continue-on-error: true
+
+    - name: Apply updates to flake.nix and flake.lock
       run: |
         set -euo pipefail
+
+        # Apply flake.lock update
         cp /tmp/flake-lock/flake.lock flake.lock
 
-    - name: Commit and push flake.lock
+        # Apply Fedora hash updates from artifacts
+        if [[ -d /tmp/fedora-hashes ]]; then
+          # Get and apply the digest (same for both architectures)
+          for dir in /tmp/fedora-hashes/fedora-hash-*/; do
+            if [[ -f "${dir}digest" ]]; then
+              NEW_DIGEST=$(cat "${dir}digest")
+              echo "Updating imageDigest to $NEW_DIGEST"
+              sed -i "s|imageDigest = \"sha256:[^\"]*\"|imageDigest = \"$NEW_DIGEST\"|" flake.nix
+              break
+            fi
+          done
+
+          # Update x86_64-linux hash
+          if [[ -f /tmp/fedora-hashes/fedora-hash-amd64/x86_64-linux.hash ]]; then
+            NEW_HASH=$(cat /tmp/fedora-hashes/fedora-hash-amd64/x86_64-linux.hash)
+            echo "Updating x86_64-linux hash to $NEW_HASH"
+            sed -i "s|\"x86_64-linux\" = \"sha256-[^\"]*\"|\"x86_64-linux\" = \"$NEW_HASH\"|" flake.nix
+          fi
+
+          # Update aarch64-linux hash
+          if [[ -f /tmp/fedora-hashes/fedora-hash-arm64/aarch64-linux.hash ]]; then
+            NEW_HASH=$(cat /tmp/fedora-hashes/fedora-hash-arm64/aarch64-linux.hash)
+            echo "Updating aarch64-linux hash to $NEW_HASH"
+            sed -i "s|\"aarch64-linux\" = \"sha256-[^\"]*\"|\"aarch64-linux\" = \"$NEW_HASH\"|" flake.nix
+          fi
+        fi
+
+    - name: Commit and push updates
       run: |
         set -euo pipefail
         if git diff --quiet flake.lock; then
