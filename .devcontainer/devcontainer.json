@@ -1,0 +1,12 @@
+{
+    "image": "mperel/nix-dev-env:fedora-latest",
+    "workspaceMount": "source=${localWorkspaceFolder},target=/app,type=bind",
+    "remoteUser": "nonroot",
+    "containerUser": "nonroot",
+    "workspaceFolder": "/app",
+    "remoteEnv": {
+        "HOME": "/home/nonroot"
+    },
+    "overrideCommand": true,
+    "runArgs": ["--entrypoint", ""]
+}

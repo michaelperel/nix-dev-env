@@ -162,6 +162,70 @@
           cp ${profilePrompt}     "$out/share/profile.d/20-prompt.sh"
           cp ${userBashrc}        "$out/share/skel/.bashrc"
         '';
+
+        # ---- Common container image settings ----
+        containerExtraCommands = ''
+          #!${pkgs.bash}/bin/bash
+          set -euxo pipefail
+
+          # `extraCommands` runs while assembling the image filesystem tree.
+          # Use relative paths so we write into the image root, not the builder's real '/'.
+          mkdir -p etc/profile.d etc/skel root tmp app home/nonroot etc/ssl usr/bin
+
+          # Many scripts expect /usr/bin/env
+          ln -sf /bin/env usr/bin/env || true
+          chmod 1777 tmp
+          chmod 0777 app
+          # Make HOME writable without relying on chown/fakeroot
+          chmod 0777 home/nonroot
+
+          # Global profile loader
+          cat > etc/profile <<"EOF"
+for f in /etc/profile.d/*.sh; do
+  . "$f"
+done
+EOF
+
+          # Profile snippets
+          install -m 0644 ${profileEnv}        etc/profile.d/00-env.sh
+          install -m 0644 ${profileCompletion} etc/profile.d/10-completion.sh
+          install -m 0644 ${profilePrompt}     etc/profile.d/20-prompt.sh
+
+          # Skeleton files
+          install -m 0644 ${userBashrc} etc/skel/.bashrc
+          # `useradd --create-home` would normally copy this into the user's home.
+          # Since we don't run useradd/groupadd during image assembly, do it explicitly.
+          install -m 0644 ${userBashrc} home/nonroot/.bashrc
+
+          # --- Users ---
+          # Avoid useradd/groupadd here: during dockerTools image assembly we may not have
+          # all the OS config files those tools expect. For containers, minimal passwd/group
+          # entries are sufficient for `User = "nonroot"` to resolve.
+          cat > etc/passwd <<"EOF"
+root:x:0:0:root:/root:/bin/bash
+nonroot:x:1000:1000:nonroot:/home/nonroot:/bin/bash
+nobody:x:65534:65534:nobody:/nonexistent:/bin/false
+EOF
+
+          cat > etc/group <<"EOF"
+root:x:0:
+nonroot:x:1000:
+nogroup:x:65534:
+EOF
+
+          echo '. /etc/profile' > etc/bash.bashrc
+
+          # TLS trust (ensure it's a symlink, not a directory)
+          rm -rf etc/ssl/certs
+          ln -sfn ${pkgs.cacert}/etc/ssl/certs etc/ssl/certs
+        '';
+
+        containerConfig = {
+          Entrypoint = [ "/bin/tini" "--" ];
+          User = "nonroot";
+          WorkingDir = "/app";
+          Cmd = [ "bash" "-l" "-i" ];
+        };
       in
       {
         # ---------------- nix develop shell ----------------
@@ -183,75 +247,29 @@
           # profile bundle for nix profile
           profileEnv = profileEnvPkg;
         } // pkgs.lib.optionalAttrs isLinux {
-          # Container image (Linux only)
+          # Container image (Linux only) - scratch base
           containerImage = pkgs.dockerTools.buildImage {
             name = "nix-dev-env";
             tag  = "latest";
-
             copyToRoot = mergedEnv;
+            extraCommands = containerExtraCommands;
+            config = containerConfig;
+          };
 
-            extraCommands = ''
-              #!${pkgs.bash}/bin/bash
-              set -euxo pipefail
-
-              # `extraCommands` runs while assembling the image filesystem tree.
-              # Use relative paths so we write into the image root, not the builder's real '/'.
-              mkdir -p etc/profile.d etc/skel root tmp app home/nonroot etc/ssl usr/bin
-
-              # Many scripts expect /usr/bin/env
-              ln -s /bin/env usr/bin/env
-              chmod 1777 tmp
-              chmod 0777 app
-              # Make HOME writable without relying on chown/fakeroot
-              chmod 0777 home/nonroot
-
-              # Global profile loader
-              cat > etc/profile <<"EOF"
-for f in /etc/profile.d/*.sh; do
-  . "$f"
-done
-EOF
-
-              # Profile snippets
-              install -m 0644 ${profileEnv}        etc/profile.d/00-env.sh
-              install -m 0644 ${profileCompletion} etc/profile.d/10-completion.sh
-              install -m 0644 ${profilePrompt}     etc/profile.d/20-prompt.sh
-
-              # Skeleton files
-              install -m 0644 ${userBashrc} etc/skel/.bashrc
-              # `useradd --create-home` would normally copy this into the user's home.
-              # Since we don't run useradd/groupadd during image assembly, do it explicitly.
-              install -m 0644 ${userBashrc} home/nonroot/.bashrc
-
-              # --- Users ---
-              # Avoid useradd/groupadd here: during dockerTools image assembly we may not have
-              # all the OS config files those tools expect. For containers, minimal passwd/group
-              # entries are sufficient for `User = "nonroot"` to resolve.
-              cat > etc/passwd <<"EOF"
-root:x:0:0:root:/root:/bin/bash
-nonroot:x:1000:1000:nonroot:/home/nonroot:/bin/bash
-nobody:x:65534:65534:nobody:/nonexistent:/bin/false
-EOF
-
-              cat > etc/group <<"EOF"
-root:x:0:
-nonroot:x:1000:
-nogroup:x:65534:
-EOF
-
-              echo '. /etc/profile' > etc/bash.bashrc
-
-              # TLS trust (ensure it's a symlink, not a directory)
-              rm -rf etc/ssl/certs
-              ln -sfn ${pkgs.cacert}/etc/ssl/certs etc/ssl/certs
-            '';
-
-            config = {
-              Entrypoint = [ "/bin/tini" "--" ];
-              User = "nonroot";
-              WorkingDir = "/app";
-              Cmd = [ "bash" "-l" "-i" ];
+          # Container image with Fedora base (Linux only)
+          containerImageFedora = pkgs.dockerTools.buildImage {
+            name = "nix-dev-env-fedora";
+            tag  = "latest";
+            fromImage = pkgs.dockerTools.pullImage {
+              imageName = "fedora";
+              imageDigest = "sha256:6cd815d862109208adf6040ea13391fe6aeb87a9dc80735c2ab07083fdf5e03a";
+              sha256 = "sha256-rZzZzVzrw5DKhiH55LFRZU09Gj0Ber2I7lJOkVR2Zn0=";
+              finalImageName = "fedora";
+              finalImageTag = "latest";
             };
+            copyToRoot = mergedEnv;
+            extraCommands = containerExtraCommands;
+            config = containerConfig;
           };
         };
       }
