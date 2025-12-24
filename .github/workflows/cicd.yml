@@ -280,14 +280,14 @@ jobs:
     - name: Commit and push updates
       run: |
         set -euo pipefail
-        if git diff --quiet flake.lock; then
-          echo "No flake.lock changes to commit."
+        if git diff --quiet flake.lock flake.nix; then
+          echo "No flake.lock or flake.nix changes to commit."
           exit 0
         fi
         git config --local user.email "action@github.com"
         git config --local user.name "GitHub Action"
-        git add flake.lock
-        git commit -m "Update flake.lock"
+        git add flake.lock flake.nix
+        git commit -m "Update flake from CI"
         git push origin HEAD:${{ github.ref_name }}
 
   publish_nix_images:
