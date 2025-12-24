@@ -1,5 +1,5 @@
 {
-    "image": "mperel/nix-dev-env:vscode-latest",
+    "image": "mperel/nix-dev-env:fedora-latest",
     "workspaceMount": "source=${localWorkspaceFolder},target=/app,type=bind",
     "remoteUser": "nonroot",
     "containerUser": "nonroot",
