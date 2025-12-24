@@ -121,7 +121,7 @@ jobs:
     
     - name: Cleanup Container image
       run: |
-        docker image rm container-built-nix-dev-env:latest || true
+        docker image rm container-built-nix-dev-env:latest --force || true
 
     - name: Build Nix Container image
       run: |
@@ -143,6 +143,10 @@ jobs:
       run: |
         docker run --rm nix-dev-env-fedora bash -c "echo 'Fedora container test successful'"
 
+    - name: Cleanup Nix store before export
+      run: |
+        nix-collect-garbage -d || true
+
     - name: Export Nix image tarball (for publish)
       if: ${{ github.ref == 'refs/heads/main' && github.repository == 'michaelperel/nix-dev-env' }}
       run: |
@@ -160,7 +164,8 @@ jobs:
     - name: Cleanup Nix image
       run: |
         rm -f "nix-image-${{ matrix.arch }}.tar" || true
-        docker image rm nix-dev-env:latest || true
+        docker image rm nix-dev-env:latest --force || true
+        docker image rm container-built-nix-dev-env:latest || true
 
     - name: Export Fedora image tarball (for publish)
       if: ${{ github.ref == 'refs/heads/main' && github.repository == 'michaelperel/nix-dev-env' }}
@@ -179,7 +184,7 @@ jobs:
     - name: Cleanup Fedora image
       run: |
         rm -f "fedora-image-${{ matrix.arch }}.tar" || true
-        docker image rm nix-dev-env-fedora:latest fedora:latest || true
+        docker image rm nix-dev-env-fedora:latest fedora:latest --force || true
 
   macos:
     runs-on: macos-latest
