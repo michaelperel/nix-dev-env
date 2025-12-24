@@ -32,12 +32,69 @@ jobs:
       uses: DeterminateSystems/nix-installer-action@main
       with:
         extra-conf: |
-          experimental-features = nix-command flakes
+          experimental-features = nix-command flakes 
+
+    - name: Update Fedora base image digest (schedule/dispatch only)
+      if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+      run: |
+        set -euo pipefail
+
+        # Pull latest Fedora and get its digest
+        docker pull fedora:latest
+        NEW_DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' fedora:latest | cut -d'@' -f2)
+
+        # Get current digest from flake.nix
+        CURRENT_DIGEST=$(grep -oP 'imageDigest = "\K[^"]+' flake.nix | head -1)
+
+        if [[ "$NEW_DIGEST" == "$CURRENT_DIGEST" ]]; then
+          echo "Fedora digest unchanged: $CURRENT_DIGEST"
+          exit 0
+        fi
+
+        echo "Updating Fedora digest from $CURRENT_DIGEST to $NEW_DIGEST"
+
+        # Update the imageDigest in flake.nix
+        sed -i "s|imageDigest = \"$CURRENT_DIGEST\"|imageDigest = \"$NEW_DIGEST\"|" flake.nix
+
+        # Use a fake hash to trigger Nix to tell us the correct one
+        FAKE_HASH="sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+        sed -i "s|sha256 = \"sha256-[^\"]*\"|sha256 = \"$FAKE_HASH\"|" flake.nix
+
+        # Try to build and capture the correct hash from the error
+        set +e
+        BUILD_OUTPUT=$(nix build .#containerImageFedora 2>&1)
+        set -e
+
+        # Extract the correct hash from the error message
+        CORRECT_HASH=$(echo "$BUILD_OUTPUT" | grep -oP 'got:\s+\K\S+' | head -1)
+
+        if [[ -z "$CORRECT_HASH" ]]; then
+          echo "Failed to get correct hash from Nix build output"
+          echo "$BUILD_OUTPUT"
+          exit 1
+        fi
+
+        echo "Correct Nix hash: $CORRECT_HASH"
+
+        # Update the sha256 in flake.nix with the correct hash
+        sed -i "s|sha256 = \"$FAKE_HASH\"|sha256 = \"$CORRECT_HASH\"|" flake.nix
+
+        # Verify the build works now
+        nix build .#containerImageFedora
+        echo "Fedora base image updated successfully"
 
     - name: Update flake.lock (schedule/dispatch only)
       if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
       run: |
         nix flake update
+
+    - name: Upload flake.nix artifact
+      if: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && github.repository == 'michaelperel/nix-dev-env' && matrix.runner == 'ubuntu-latest' }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: flake-nix
+        path: flake.nix
+        retention-days: 1
 
     - name: Upload flake.lock artifact
       if: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && github.repository == 'michaelperel/nix-dev-env' && matrix.runner == 'ubuntu-latest' }}
@@ -72,6 +129,15 @@ jobs:
       run: |
         docker run --rm nix-dev-env bash -c "echo 'Container test successful'"
 
+    - name: Build Nix Fedora Container image
+      run: |
+        nix build .#containerImageFedora
+        docker load < result
+
+    - name: Test Nix Fedora Container image
+      run: |
+        docker run --rm nix-dev-env-fedora bash -c "echo 'Fedora container test successful'"
+
     - name: Export Nix image tarball (for publish)
       if: ${{ github.ref == 'refs/heads/main' && github.repository == 'michaelperel/nix-dev-env' }}
       run: |
@@ -99,6 +165,20 @@ jobs:
       with:
         name: vscode-image-${{ matrix.arch }}
         path: vscode-image-${{ matrix.arch }}.tar
+        retention-days: 1
+
+    - name: Export Fedora image tarball (for publish)
+      if: ${{ github.ref == 'refs/heads/main' && github.repository == 'michaelperel/nix-dev-env' }}
+      run: |
+        set -euo pipefail
+        docker save nix-dev-env-fedora -o "fedora-image-${{ matrix.arch }}.tar"
+
+    - name: Upload Fedora image tarball artifact
+      if: ${{ github.ref == 'refs/heads/main' && github.repository == 'michaelperel/nix-dev-env' }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: fedora-image-${{ matrix.arch }}
+        path: fedora-image-${{ matrix.arch }}.tar
         retention-days: 1
 
   macos:
@@ -289,8 +369,8 @@ jobs:
           "$IMAGE_NAME:latest-amd64" \
           "$IMAGE_NAME:latest-arm64"
 
-  publish_vscode_images:
-    name: Publish VSCode images (${{ matrix.arch }})
+  publish_fedora_images:
+    name: Publish Fedora images (${{ matrix.arch }})
     needs: linux
     if: ${{ github.ref == 'refs/heads/main' && github.repository == 'michaelperel/nix-dev-env' }}
     runs-on: ${{ matrix.runner }}
@@ -307,16 +387,16 @@ jobs:
       contents: read
 
     steps:
-    - name: Download VSCode image tarball
+    - name: Download Fedora image tarball
       uses: actions/download-artifact@v4
       with:
-        name: vscode-image-${{ matrix.arch }}
-        path: /tmp/vscode-image
+        name: fedora-image-${{ matrix.arch }}
+        path: /tmp/fedora-image
 
-    - name: Load VSCode image
+    - name: Load Fedora image
       run: |
         set -euo pipefail
-        docker load < "/tmp/vscode-image/vscode-image-${{ matrix.arch }}.tar"
+        docker load < "/tmp/fedora-image/fedora-image-${{ matrix.arch }}.tar"
 
     - name: Log in to Docker Hub
       uses: docker/login-action@v3
@@ -343,17 +423,17 @@ jobs:
           IMAGE_NAME="$DOCKERHUB_USERNAME/nix-dev-env"
         fi
 
-        VERSION_TAG="vscode-sha-${GITHUB_SHA}"
+        VERSION_TAG="fedora-sha-${GITHUB_SHA}"
 
-        docker tag container-built-nix-dev-env:latest "$IMAGE_NAME:${VERSION_TAG}-${ARCH}"
+        docker tag nix-dev-env-fedora:latest "$IMAGE_NAME:${VERSION_TAG}-${ARCH}"
         docker push "$IMAGE_NAME:${VERSION_TAG}-${ARCH}"
 
-        docker tag container-built-nix-dev-env:latest "$IMAGE_NAME:vscode-latest-${ARCH}"
-        docker push "$IMAGE_NAME:vscode-latest-${ARCH}"
+        docker tag nix-dev-env-fedora:latest "$IMAGE_NAME:fedora-latest-${ARCH}"
+        docker push "$IMAGE_NAME:fedora-latest-${ARCH}"
 
-  push_vscode_manifest:
-    name: Push VSCode multi-arch manifest
-    needs: publish_vscode_images
+  push_fedora_manifest:
+    name: Push Fedora multi-arch manifest
+    needs: publish_fedora_images
     if: ${{ github.ref == 'refs/heads/main' && github.repository == 'michaelperel/nix-dev-env' }}
     runs-on: ubuntu-latest
     environment: dockerhub
@@ -378,7 +458,7 @@ jobs:
           IMAGE_NAME="$DOCKERHUB_USERNAME/nix-dev-env"
         fi
 
-        VERSION_TAG="vscode-sha-${GITHUB_SHA}"
+        VERSION_TAG="fedora-sha-${GITHUB_SHA}"
 
         echo "IMAGE_NAME=$IMAGE_NAME" >> "$GITHUB_ENV"
         echo "VERSION_TAG=$VERSION_TAG" >> "$GITHUB_ENV"
@@ -402,6 +482,6 @@ jobs:
           "$IMAGE_NAME:${VERSION_TAG}-arm64"
 
         docker buildx imagetools create \
-          -t "$IMAGE_NAME:vscode-latest" \
-          "$IMAGE_NAME:vscode-latest-amd64" \
-          "$IMAGE_NAME:vscode-latest-arm64"
+          -t "$IMAGE_NAME:fedora-latest" \
+          "$IMAGE_NAME:fedora-latest-amd64" \
+          "$IMAGE_NAME:fedora-latest-arm64"
