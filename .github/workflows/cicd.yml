@@ -77,10 +77,6 @@ jobs:
         # Update with the correct hash
         sed -i "s|\"$NIX_SYSTEM\" = \"$FAKE_HASH\"|\"$NIX_SYSTEM\" = \"$CORRECT_HASH\"|" flake.nix
 
-        # Verify the build works
-        nix build .#containerImageFedora
-        rm result
-
         # Save the hash and digest for later aggregation
         mkdir -p /tmp/fedora-hashes
         echo "$CORRECT_HASH" > "/tmp/fedora-hashes/$NIX_SYSTEM.hash"
@@ -122,6 +118,10 @@ jobs:
     - name: Test Container image
       run: |
         docker run --rm container-built-nix-dev-env bash -c "echo 'Container test successful'"
+    
+    - name: Cleanup Container image
+      run: |
+        docker image rm container-built-nix-dev-env:latest || true
 
     - name: Build Nix Container image
       run: |
@@ -147,8 +147,7 @@ jobs:
       if: ${{ github.ref == 'refs/heads/main' && github.repository == 'michaelperel/nix-dev-env' }}
       run: |
         set -euo pipefail
-        # `result` is a symlink; copy the actual tarball so upload-artifact gets a real file.
-        cp -L result "nix-image-${{ matrix.arch }}.tar"
+        docker save nix-dev-env -o "nix-image-${{ matrix.arch }}.tar"
 
     - name: Upload Nix image tarball artifact
       if: ${{ github.ref == 'refs/heads/main' && github.repository == 'michaelperel/nix-dev-env' }}
@@ -162,7 +161,6 @@ jobs:
       run: |
         rm -f "nix-image-${{ matrix.arch }}.tar" || true
         docker image rm nix-dev-env:latest || true
-        docker image rm container-built-nix-dev-env:latest || true
 
     - name: Export Fedora image tarball (for publish)
       if: ${{ github.ref == 'refs/heads/main' && github.repository == 'michaelperel/nix-dev-env' }}
