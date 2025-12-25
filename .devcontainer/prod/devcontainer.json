@@ -1,4 +1,5 @@
 {
+    "name": "Prod",
     "image": "mperel/nix-dev-env:fedora-latest",
     "workspaceMount": "source=${localWorkspaceFolder},target=/app,type=bind",
     "remoteUser": "nonroot",
