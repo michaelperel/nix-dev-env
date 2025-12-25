@@ -1,0 +1,9 @@
+{
+    "name": "Codespaces with Nix",
+    "build": {
+        "dockerfile": "Dockerfile"
+    },
+    "workspaceMount": "source=${localWorkspaceFolder},target=/app,type=bind",
+    "workspaceFolder": "/app",
+    "overrideCommand": true
+}
